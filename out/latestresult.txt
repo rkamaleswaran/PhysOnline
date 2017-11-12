@@ -1,0 +1,1 @@
+Epoch: 1510185278489 Duration of Job was: 170.657534802 Accuracy : 0.9913294797687862 Sen: 0.0 Sps: 1.0 F1: NaN
