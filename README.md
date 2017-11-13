@@ -1,5 +1,6 @@
 # PhysOnline
 Online Feature Extraction and Machine Learning of Streaming Physiological Data
+Developed by Rishikesan Kamaleswaran and Jacob Sutton
 
 # Prerequisite Software:
   - Apache Spark 2.2.0
