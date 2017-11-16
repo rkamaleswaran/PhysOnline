@@ -12,3 +12,6 @@ Online Feature Extraction and Machine Learning of Streaming Physiological Data
   
 # Build instructions
 Extract directory, modify the credentials in the psprSpark.scala file in the source directory. Run "sbt package" in the root directory. Once the target file has been created use spark-submit to execute the spark file.
+
+#Spark Submit
+Dont forget jar files.
