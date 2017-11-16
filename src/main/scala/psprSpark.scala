@@ -76,11 +76,14 @@ import com.mongodb.spark.config._
 import com.mongodb.spark._
 
 
+//Create the appliction name
 object PSPRwindow {
+
 
   def main(args: Array[String]) {
 
-    //RabbitMQ things
+
+    //Set parameters for connecting to the RabbitMQ Queue
     val host = "127.0.0.0"
     val queueName = "queueName"
     val userName = "user"
@@ -98,17 +101,19 @@ object PSPRwindow {
     val ssc =  new StreamingContext(sparkConfig, Seconds(5))
     val sc = SparkContext
 
+    //configure the stream for accessing data from RabbitMQ	
+    val receiverStream = RabbitMQUtils.createStream(ssc, Map(
+      "hosts" -> host,
+      "queueName" -> queueName,
+      "userName" -> userName,
+      "password" -> password
+    ))
 
-
-  val receiverStream = RabbitMQUtils.createStream(ssc, Map(
-    "hosts" -> host,
-    "queueName" -> queueName,
-    "userName" -> userName,
-    "password" -> password
-  ))
-
+    //Create an accumaltor to save results 
     val CreatedSymbols = ssc.sparkContext.longAccumulator("My Accumulator")
 
+
+    //Start the stream
     receiverStream.start()
     println("Started the Receiver Stream")
 
@@ -121,7 +126,7 @@ object PSPRwindow {
 
       import spark.implicits._
 
-      //Read configureation for reading the MongoDB table
+      //Create the  configureation for reading from the MongoDB table
       val readConfig = ReadConfig(Map("uri" -> mongoDB))
       val info = MongoSpark.load(spark, readConfig)
                           .printSchema()
@@ -131,9 +136,10 @@ object PSPRwindow {
         println("count is " + Count)
       //select column that is the array of datapoints and read it into a list and then into a dataframe
 
-	  val t1 = System.nanoTime
+      val t1 = System.nanoTime
       println("...Reading data frame... ")
-        //Schema for PAFData
+     
+      //Schema for PAFData
         val schema = StructType(
             StructField("label", StringType, true) ::
             StructField("id", StringType, true) ::
@@ -141,43 +147,51 @@ object PSPRwindow {
             StructField("data",StringType, true) :: Nil)
 
 
-
+	//Create inital data frame from streaming data
         val DF1a = spark.read
           .schema(schema)
           .option("wholeTextFile", true).option("mode", "PERMISSIVE")
           .json(rdd)
 
+	//create a function to transform the ECG waveform data points from strings to doubles
         val toArray = udf((b: String) => b.split(",").map(_.toDouble))
 
         println("...Flattening data... ")
 
+	//tranform data from string to doubles
         val DF1 = DF1a.withColumn("data", toArray(col("data")))
 
-        //flist for PAFData
+        //create new data frame with indexed data points by flattening the array
         val fList = DF1.select($"id", $"sid", $"label", posexplode($"data")).withColumn("data_flat", $"col").drop("col")
 
         println("...Smoothing data... ")
 
-        //Smoothing data with moving average
+        //Create a window function size 16
         val wSpec1 = Window.partitionBy("id").rowsBetween(-16, 0)
 
+	//create a new data frame with the moving average taken using the window function
         val fL = fList.withColumn("movingAvg", avg(fList("data_flat")).over(wSpec1))
+
+	//create a tempory table to store results
         fL.createOrReplaceTempView("df")
 
         println("...Calutlating quantiles...")
 
-        //df2 for PAFData
+        //create a new data frame, renaaming moving average -> quantiles, and  ordering by id
         val df2 = spark.sql("select id, percentile_approx(movingAvg, array(0.2, 0.4, 0.6, 0.8D)) as quantiles from df group by id order by id")
 
+	//join data frame 1 and 2 into a new DF called jDF
         val jDF = df2.join(DF1, Seq("id"))
 
         println("...Creating joined table...")
 
-	
-        val jDF2 = jDF.select($"id", $"sid", $"label",  $"quantiles", posexplode($"data")).select($"id", $"sid", $"label",  $"quantiles", $"pos" , $"col".cast("double").as("data_flat"))
+	//create new DF with all columns from above
+        val jDF2 = jDF.select($"id", $"sid", $"label",  $"quantiles", posexplode($"data"))
+		      .select($"id", $"sid", $"label",  $"quantiles", $"pos" , $"col".cast("double").as("data_flat"))
 
         println("...Converting data to symbols...")
 
+	//create function to assign symbol "A:E" based on where data point falls in quantiles
         val numToSAX = when( $"data_flat" === null, null ).otherwise(
           when($"data_flat" < $"quantiles".getItem(0), "A" ).otherwise(
             when($"data_flat" >= $"quantiles".getItem(0) && $"data_flat" < $"quantiles".getItem(1), "B").otherwise(
@@ -190,32 +204,30 @@ object PSPRwindow {
           )
         )
 
-        //Calling function to create data
+        //Calling function to create symbols for each data point
         val newPSPR = jDF2.withColumn("SAX", numToSAX)
-        //newPSPR.show
+       
         //Idenetify the PTPs
         val lPTPs = 6
         val nPTPs = 7
 
         println("...Generating symbol sequences...")
 
+	//dynaimc call to solve PTPs from l to n as designated above
         for( a <- lPTPs to nPTPs){
 
-          //create window
+          //create window function for PTP, orders by id and sid
           val w= org.apache.spark.sql.expressions.Window.partitionBy("id", "sid").orderBy("id", "sid", "pos").rowsBetween(0,a-1)
 
-          //create the new DF with window
+          //create the new DF with window fcuntion. Collect sequences in new column "olSASX"
           val olSAX = newPSPR.withColumn("olSAXw", collect_list("SAX").over(w))
 
-          //println("...Showing olSAX...")
-          //olSAX.show()
-          //Set up DF
-                 //Set 
-        val SymCols= olSAX.select(($"label" +: $"sid" +: $"id" +: Range(0, a).map(idx => $"olSAXw"(idx) as "s" + (idx + 1)):_* ))
-        val ncol = SymCols.columns.slice(0,a+2).toSeq
-        val nseqCols = ncol.map(name => col(name))
+          //Set up DF 
+          val SymCols= olSAX.select(($"label" +: $"sid" +: $"id" +: Range(0, a).map(idx => $"olSAXw"(idx) as "s" + (idx + 1)):_* ))
+          val ncol = SymCols.columns.slice(0,a+2).toSeq
+          val nseqCols = ncol.map(name => col(name))
         
-        val sumSymbols= SymCols.groupBy((nseqCols :+ col("s" + a)):_*).count.withColumn("transitionCount", $"count").drop("count")
+          val sumSymbols= SymCols.groupBy((nseqCols :+ col("s" + a)):_*).count.withColumn("transitionCount", $"count").drop("count")
 
           //println("...showing sumSymbols...")
           //sumSymbols.show()
