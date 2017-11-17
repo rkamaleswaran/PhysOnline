@@ -219,19 +219,18 @@ object PSPRwindow {
           //create window function for PTP, orders by id and sid
           val w= org.apache.spark.sql.expressions.Window.partitionBy("id", "sid").orderBy("id", "sid", "pos").rowsBetween(0,a-1)
 
-          //create the new DF with window fcuntion. Collect sequences in new column "olSASX"
+          //create the new DF with window function. Collect sequences in new column "olSASX"
           val olSAX = newPSPR.withColumn("olSAXw", collect_list("SAX").over(w))
 
-          //Set up DF 
+       	 
           val SymCols= olSAX.select(($"label" +: $"sid" +: $"id" +: Range(0, a).map(idx => $"olSAXw"(idx) as "s" + (idx + 1)):_* ))
           val ncol = SymCols.columns.slice(0,a+2).toSeq
           val nseqCols = ncol.map(name => col(name))
         
+	  //create new DF with new column to hold transiton counts
           val sumSymbols= SymCols.groupBy((nseqCols :+ col("s" + a)):_*).count.withColumn("transitionCount", $"count").drop("count")
 
-          //println("...showing sumSymbols...")
-          //sumSymbols.show()
-          //convert letter in CSi into strings for comparsion
+          //convert letters into strings for comparison, create new column to get the total count of all sequeneces
           val Symbols = SymCols.groupBy(nseqCols:_*).count.withColumn("totalCount", $"count").drop("count")
 
           //pivot on sequence
@@ -241,18 +240,17 @@ object PSPRwindow {
 		  .withColumn("SEQ",concat((nseqCols.slice(3, a+2)):_*) )
 		  .withColumn("HEX", hex($"SEQ")).drop( (ncol.slice(3, a+2)):_* )
           println("...Writing PTP" + a.toString + " to MongoDB...")
-          //pivotLoop.show()
 
           //read reference data from PAFepisode in MongoDB
           val r2 = "mongodb://localhost:27017/psprDB.PAFEpisode" + a.toString
+
           //val REFdf = spark.read.format("com.mongodb.spark.sql.DefaultSource").option("uri", r2).load()
           val readConfig2 = ReadConfig(Map("uri" -> r2))
           val PafRef = MongoSpark.load(spark, readConfig2).drop("_id")
-
-          //PafRef.show()
-		  
+  
           println("...Creating vectors from data...")
-          //Create Vectors
+
+          //Create Vectors needed for distance calculations
           val assemblerPAF = new VectorAssembler().setInputCols(Array("A","B","C","D","E")).setOutputCol("VectPAFPTP" + a.toString)
           val pivtVectPAF = assemblerPAF.transform(pivotLoop.na.fill(0)).drop("A","B","C","D","E")
           pivtVectPAF.createOrReplaceTempView("dfPTP" + a.toString)
@@ -261,16 +259,23 @@ object PSPRwindow {
           val pivtVectREF = assemblerREF.transform(PafRef.na.fill(0)).drop("A","B","C","D","E")
           pivtVectREF.createOrReplaceTempView("dfPTPep" + a.toString)
 
+	  //create Euclidean Distance function
           val euclidean = udf((v1: Vector, v2: Vector) => Vectors.sqdist(v1, v2))
 
+	  //create tables of all data from vectors
           val t1 = spark.sql("select * from dfPTP" +  a.toString )
           val t2 = spark.sql("select * from dfPTPep" +  a.toString )
 
+	  //join the two tables together
           val jTab = t1.join(t2, Seq("HEX", "SEQ"))
-          val jnTab = jTab.withColumn("dist" + a.toString, sqrt(euclidean( col("VectPAFPTP" + a.toString) , col("VectPAFPTPep" + a.toString) ))).drop("VectPAFPTP" + a.toString, "VectPAFPTPep" + a.toString)
+
+	  //run euclidean distance calculation, save result in new column
+          val jnTab = jTab.withColumn("dist" + a.toString, sqrt(euclidean( col("VectPAFPTP" + a.toString) , col("VectPAFPTPep" + a.toString) )))
+			  .drop("VectPAFPTP" + a.toString, "VectPAFPTPep" + a.toString)
 
           println("showing jnTab")
-          //jnTab.show()
+          
+	  //create temporary table called jnPTP
           jnTab.createOrReplaceTempView("jnPTP" + a.toString)
 
 //          //save to DB
@@ -282,21 +287,27 @@ object PSPRwindow {
 
 		println("Starting to merge all PTPs into single dataframe")
 
+		//dynamic for loop to go through the different PTP types designated as before
 		for( a <- lPTPs to nPTPs-1){
 
+			//create tables with complete data for PTPs 
 			val t1 = spark.sql("select * from jnPTP" +  a.toString ).drop("HEX", "SEQ")
 			val t2 = spark.sql("select * from jnPTP" +  (a+1).toString ).drop("HEX", "SEQ")
 
+			//join the two tables together and create temporary table
 			val jTab = t1.join(t2, Seq("id", "sid", "label"))
 			jTab.createOrReplaceTempView("jnPTP" + (a+1).toString)
 		}
 
+		//Select all the data relevant columns to be used as inputs
 		val inputR = spark.sql("select * from jnPTP" + nPTPs.toString)
-			
+		
+		//caputer data relevant columns	
 		val exprs = inputR.columns.slice(3, nPTPs+3).map( r => (sqrt(sum( r )) / count("id") ).as(r) )
 
 		println("Starting GroupBy by label, id, and sid")
 		
+		//preform groupby function 
 		val jal = inputR.groupBy("label", "id", "sid").agg(exprs.head, exprs.tail: _*)
 
 		println("Starting descriptives calculations" + " Duration was: " + ((System.nanoTime - t1) / 1e9d) )
@@ -306,56 +317,66 @@ object PSPRwindow {
 		val fLDesc = fList.withColumn("mean", mean(fList("data_flat")).over(wSpecDesc)).withColumn("min", min(fList("data_flat")).over(wSpecDesc)).withColumn("max", max(fList("data_flat")).over(wSpecDesc)).withColumn("stdev", stddev(fList("data_flat")).over(wSpecDesc)).withColumn("kurt", kurtosis(fList("data_flat")).over(wSpecDesc)).withColumn("skew", skewness(fList("data_flat")).over(wSpecDesc)).withColumn("variance", variance(fList("data_flat")).over(wSpecDesc)).withColumn("sum", sum(fList("data_flat")).over(wSpecDesc))
 		val finalDescriptivesPt = fLDesc.drop("pos", "data_flat").groupBy("label", "id", "sid").agg(first("mean").as("mean"), first("min").as("min"), first("max").as("max"), first("stdev").as("stdev"), first("kurt").as("kurt"), first("skew").as("skew"), first("variance").as("variance"), first("sum").as("sum"), (first("max") - first("min")).as("range")    )
 
+		//create final DF with all data and descriptives
 		val finalDB = finalDescriptivesPt.join(jal, Seq("label", "id", "sid"))
 
 		val ncol = finalDB.columns.slice(3,nPTPs+12).toArray
 
 		println("Completed descriptives now assembling final vector" + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
 		
+		//create final vector to be read into ML 		
 		val asemblr = new VectorAssembler().setInputCols(ncol)
 				  .setOutputCol("features")
 		//
-		//        val PAFout = assembler1.transform(pivot3)
+		// val PAFout = assembler1.transform(pivot3)
+		
+		//transform the final vector
 		val inputSA = asemblr.transform(finalDB)
 		//inputSA.cache
-		//inputSA.show
-    println("Completed transform assembling" + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
+	
+		 println("Completed transform assembling" + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
 		//val inclu = Array("P001", "P009", "P0011", "P0021", "P0031", "P0041", "P0061", "P0071")
-    val inclu = Array("")
+  	 	val inclu = Array("")
 		val training = inputSA.filter(!$"id".isin(inclu:_*)).select($"label".cast("int"), $"features")
 		val testing = inputSA.filter($"id".isin(inclu:_*)).select($"label".cast("int"), $"features")
 		
 		//training.show()
 
-		
+		//load the Random Forrest Model
 		val model = CrossValidatorModel.load("/home/spark/psprStreaming/out/myRandomForestClassificationModel")
-    println("loaded model " + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
+	   	println("loaded model " + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
 
         // PTP 2- 6
 
+		//create predictions
 		val predictions = model.transform(training)
 		// predictions.select( "label", "prediction").show(5)
 
         println("generated predictions " + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
-
+		
+		//create an evaluator to analyze results
 		val evaluator = new MulticlassClassificationEvaluator()
 		  .setLabelCol("label")
 		  .setPredictionCol("prediction")
 		  .setMetricName("accuracy")
 
         println("generated evaluator " + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
+		//calculate the accuary 
 		val accuracy = evaluator.evaluate(predictions)
 
         println("completed evaluation " + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
-
+		
+		//find the accuary based on inital label and predicited label
 		val TP = predictions.select("label", "prediction").filter("label = 1 and prediction = 1").count  
 		val TN = predictions.select("label", "prediction").filter("label = 0 and prediction = 0").count  
 		val FP = predictions.select("label", "prediction").filter("label = 0 and prediction = 1").count  
 		val FN = predictions.select("label", "prediction").filter("label = 1 and prediction = 0").count  
 		val total = predictions.select("label").count.toDouble
 
+		//create array to hold walues from the accuary
 		val confusion: MX = MS.dense(2, 2, Array(TP, FN, FP, TN))
 
+		//calculate specifics
 		val acc    = (TP + TN) / total  
 		val precision   =  TP / (TP + FP).toDouble 
 		val recall      = TP / (TP + FN).toDouble
@@ -367,12 +388,13 @@ object PSPRwindow {
 	val duration = (System.nanoTime - t1) / 1e9d
 	val result = "Epoch: " + System.currentTimeMillis() + " Duration of Job was: " + ((System.nanoTime - t1) / 1e9d) +  " Accuracy : " + accuracy + " Sen: " + sensitivity + " Sps: " + specificity + " F1: " + F1
 	
+	//write reslts to a text file to see outside of application
 	new PrintWriter("./out/latestresult.txt") { write(result); close }
 
 	val fw = new FileWriter("./out/results.txt", true) ; 
 	fw.write( "\r\n" + result)
 	fw.close();
-    println(result)
+   	 println(result)
 		
 		
 		
