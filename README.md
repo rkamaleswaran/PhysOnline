@@ -27,5 +27,5 @@ The spark-submit command will not work unelss you have have listed the coincidin
    - slf4j-nop-1.7.25.jar
    - mongo-spark-connector_2.11-2.2.0.jar
    - mongo-java-driver-3.4.2.jar  
-
+<br>These can all be found in the in the lib directory.
 For more information on how the spark streaming process works, please check out https://spark.apache.org/docs/latest/streaming-programming-guide.html
