@@ -1,6 +1,7 @@
 # PhysOnline
 Online Feature Extraction and Machine Learning of Streaming Physiological Data
-<br> This is a novel near real-time machine learning pipline used to classify Paroxysmal artial fibrillation (PAF) in an online streaming envoriment. This methid uses the scalable and parallelized Apache Spark platform. 
+<br> This is a novel near real-time machine learning pipline used to classify Paroxysmal artial fibrillation (PAF) in an online streaming envoriment. This methid uses the scalable and parallelized Apache Spark platform.
+<br> 
 <br> <i>Developed by Rishikesan Kamaleswaran and Jacob Sutton
 <br> <i>Center for Biomedical Informatics, University of Tennessee Health Science Center
 
