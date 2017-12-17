@@ -349,7 +349,7 @@ object PSPRwindow {
         // PTP 2- 6
 
 		//create predictions
-		val predictions = model.transform(training)
+		val predictions = model.transform(testing)
 		// predictions.select( "label", "prediction").show(5)
 
         println("generated predictions " + " Duration was: " + ((System.nanoTime - t1) / 1e9d))
