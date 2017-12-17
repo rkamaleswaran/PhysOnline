@@ -1,6 +1,6 @@
 # PhysOnline
 Online Feature Extraction and Machine Learning of Streaming Physiological Data
-<br> This is a novel near real-time machine learning pipline used to classify Paroxysmal artial fibrillation (PAF) in an online streaming envoriment. This methid uses the scalable and parallelized Apache Spark platform.
+<br> This is a novel near real-time machine learning pipeline used to classify Paroxysmal atrial fibrillation (PAF) in an online streaming environment. This method uses the scalable and parallelized Apache Spark platform.
 <br> 
 <br> <i>Developed by Rishikesan Kamaleswaran and Jacob Sutton
 <br> <i>Center for Biomedical Informatics, University of Tennessee Health Science Center
@@ -19,7 +19,7 @@ Online Feature Extraction and Machine Learning of Streaming Physiological Data
   4) Once the step #3 has been run, a target file should have been created. Then use the command "spark-submit" in the root directory to execute the spark file.
 
 # Spark Submit
-The spark-submit command will not work unelss you have have listed the coinciding jar files to be run in tandem:
+The spark-submit command will not work unless you have listed the coinciding jar files to be run in tandem:
    - amqp-client-4.1.0.jar
    - spark-rabbitme-0.5.1.jar
    - akka-actor_2.11-2.4.11.jar
@@ -29,3 +29,4 @@ The spark-submit command will not work unelss you have have listed the coincidin
    - mongo-java-driver-3.4.2.jar  
 <br>These can all be found in the in the lib directory.
 For more information on how the spark streaming process works, please check out https://spark.apache.org/docs/latest/streaming-programming-guide.html
+
