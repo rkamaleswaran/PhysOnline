@@ -6,8 +6,9 @@ Online Feature Extraction and Machine Learning of Streaming Physiological Data
 <br> <i>Center for Biomedical Informatics, University of Tennessee Health Science Center
 
 # Citations:
-Please cite the tool using the following:
-<br> Sutton, J.R., Mahajan, R., Akbilgic, O. and Kamaleswaran, R., 2018. PhysOnline: an open source machine learning pipeline for real-time analysis of streaming physiological waveform. IEEE journal of biomedical and health informatics, 23(1), pp.59-65.
+- Please cite the tool using the following:
+<br> - Sutton, J.R., Mahajan, R., Akbilgic, O. and Kamaleswaran, R., 2018. PhysOnline: an open source machine learning pipeline for real-time analysis of streaming physiological waveform. IEEE journal of biomedical and health informatics, 23(1), pp.59-65.
+<br> https://ieeexplore.ieee.org/abstract/document/8353460/
 
 # Prerequisite Software:
   - Apache Spark 2.2.0
